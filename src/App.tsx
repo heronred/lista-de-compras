@@ -26,6 +26,7 @@ import { UserProfile, Family, ShoppingList, ShoppingItem, ExpenseRecord } from "
 import NFScanner from "./components/NFScanner";
 import SpendHabitsReport from "./components/SpendHabitsReport";
 import AlertNotificationCenter from "./components/AlertNotificationCenter";
+import SupermarketMode from "./components/SupermarketMode";
 import { 
   ShoppingBag, 
   LogOut, 
@@ -56,7 +57,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   
   // App UI Views
-  const [activeTab, setActiveTab] = useState<"lists" | "report">("lists");
+  const [activeTab, setActiveTab] = useState<"lists" | "supermarket" | "report">("lists");
   const [showQrJoin, setShowQrJoin] = useState(false);
   const [familyInputToken, setFamilyInputToken] = useState("");
   const [newFamilyName, setNewFamilyName] = useState("");
@@ -813,7 +814,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="font-display font-extrabold text-base text-slate-800 tracking-tight leading-none">
-                  Comprafácil Co-op
+                  LHAG
                 </h1>
                 <p className="text-[11px] text-slate-400 font-medium leading-none mt-1">
                   Família: <span className="font-semibold text-slate-600">{family.name}</span>
@@ -883,6 +884,17 @@ export default function App() {
           >
             <ListTodo className="w-4 h-4" />
             <span>Listas Compartilhadas</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("supermarket")}
+            className={`py-3 font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+              activeTab === "supermarket" 
+                ? "border-indigo-600 text-indigo-700" 
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            <ShoppingCart className="w-4 h-4" />
+            <span>Modo Supermercado 📱</span>
           </button>
           <button
             onClick={() => setActiveTab("report")}
@@ -1215,6 +1227,21 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : activeTab === "supermarket" ? (
+          <SupermarketMode
+            lists={lists}
+            activeListId={activeListId}
+            onSelectList={setActiveListId}
+            activeList={activeList}
+            items={items}
+            onToggleCheck={handleToggleCheck}
+            onOpenCheckout={() => {
+              if (activeList) {
+                setFinalInvoiceAmount(activeList.totalEstBudget.toFixed(2));
+                setCheckoutModalOpen(true);
+              }
+            }}
+          />
         ) : (
           /* HABITS prediction reports subview */
           <SpendHabitsReport 
