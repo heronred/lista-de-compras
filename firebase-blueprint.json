@@ -1,0 +1,128 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and active family token reference.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The unique user identifier matching request.auth.uid" },
+        "displayName": { "type": "string", "description": "Name of the user" },
+        "email": { "type": "string", "description": "Verified Google email" },
+        "photoURL": { "type": "string", "description": "User profile picture" },
+        "familyId": { "type": "string", "description": "Joined family token identifier" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account registration timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last profile update" }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "Family": {
+      "title": "Family Group",
+      "description": "Family container linking multiple users via shared token codes.",
+      "type": "object",
+      "properties": {
+        "familyId": { "type": "string", "description": "Custom alphanumeric join token code" },
+        "name": { "type": "string", "description": "Name of the family group" },
+        "createdBy": { "type": "string", "description": "User UID who generated the family group" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["familyId", "name", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ShoppingList": {
+      "title": "Shopping List",
+      "description": "A collaborative shopping list shared with members of the same family ID.",
+      "type": "object",
+      "properties": {
+        "listId": { "type": "string" },
+        "title": { "type": "string" },
+        "familyId": { "type": "string", "description": "Family join token sharing this list" },
+        "createdBy": { "type": "string" },
+        "itemsCount": { "type": "integer" },
+        "checkedItemsCount": { "type": "integer" },
+        "totalEstBudget": { "type": "number" },
+        "monthlyEstimate": { "type": "number" },
+        "scannedFromNF": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["listId", "title", "familyId", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ShoppingItem": {
+      "title": "Shopping List Item",
+      "description": "Individual items inside a shopping list with quantities and categories.",
+      "type": "object",
+      "properties": {
+        "itemId": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "category": { "type": "string" },
+        "estimatedPrice": { "type": "number" },
+        "checked": { "type": "boolean" },
+        "checkedBy": { "type": "string" },
+        "checkedAt": { "type": "string", "format": "date-time" },
+        "addedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemId", "name", "quantity", "checked", "addedBy", "createdAt", "updatedAt"]
+    },
+    "Expense": {
+      "title": "Family Expense Record",
+      "description": "Historic trip checkout records used for visual reports and shopping habits forecasting.",
+      "type": "object",
+      "properties": {
+        "expenseId": { "type": "string" },
+        "listId": { "type": "string" },
+        "familyId": { "type": "string" },
+        "shopperId": { "type": "string" },
+        "shopperName": { "type": "string" },
+        "spentAt": { "type": "string", "format": "date-time" },
+        "totalSpent": { "type": "number" },
+        "itemsCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["expenseId", "familyId", "shopperId", "spentAt", "totalSpent", "itemsCount", "createdAt"]
+    },
+    "ActivityLog": {
+      "title": "Activity / Push Notification Log",
+      "description": "Push alerts and changes logged in real-time to synchronize collaborative changes to active family members.",
+      "type": "object",
+      "properties": {
+        "activityId": { "type": "string" },
+        "familyId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["activityId", "familyId", "userId", "userName", "message", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User specific profiles tied to authenticated Google emails."
+    },
+    "families/{familyId}": {
+      "schema": "Family",
+      "description": "Family tokens allowing users to join specific networks."
+    },
+    "shopping_lists/{listId}": {
+      "schema": "ShoppingList",
+      "description": "Global list metadata sharing family-wide read/write bounds."
+    },
+    "shopping_lists/{listId}/items/{itemId}": {
+      "schema": "ShoppingItem",
+      "description": "Subcollection items that can be ticed off live."
+    },
+    "expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "List of purchase receipt totals for metrics reporting."
+    },
+    "activities/{activityId}": {
+      "schema": "ActivityLog",
+      "description": "Logs used as real-time notifications when a user mutates lists."
+    }
+  }
+}

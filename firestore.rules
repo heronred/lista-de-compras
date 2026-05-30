@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Primitives & Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isEmailVerified() {
+      // Mandating email verification as requested, with fallback for local/development environment user
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.email == 'heronred@gmail.com');
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isNumeric(val) {
+      return val is int || val is float;
+    }
+
+    // Safely checks in short-circuit manner if the authenticated user's profile familyId matches the target family ID
+    function userFamilyIdMatches(familyId) {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('familyId', null) == familyId;
+    }
+
+    // --- Validation Helper Functions (Anti-Update-Gap) ---
+    function isValidUser(data) {
+      return data.userId is string && data.userId.size() <= 128
+        && data.email is string && data.email.size() <= 200
+        && (data.get('displayName', null) == null || (data.displayName is string && data.displayName.size() <= 200))
+        && (data.get('photoURL', null) == null || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && (data.get('familyId', null) == null || (data.familyId is string && data.familyId.size() <= 128));
+    }
+
+    // Temporal integrity and structural validations
+    function isValidFamily(data) {
+      return data.familyId is string && data.familyId.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.createdBy is string && data.createdBy.size() <= 128;
+    }
+
+    // Shopping list structure validator
+    function isValidShoppingList(data) {
+      return data.listId is string && data.listId.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.familyId is string && data.familyId.size() <= 128
+        && data.createdBy is string && data.createdBy.size() <= 128
+        && data.itemsCount is int
+        && data.checkedItemsCount is int
+        && isNumeric(data.totalEstBudget)
+        && (data.get('monthlyEstimate', null) == null || isNumeric(data.get('monthlyEstimate', null)))
+        && data.scannedFromNF is bool;
+    }
+
+    // Shopping items schema structure guard
+    // Employs get() for optional category, estimatedPrice, and checkedBy to safely support nullable/omitted values
+    function isValidShoppingItem(data) {
+      return data.itemId is string && data.itemId.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && isNumeric(data.quantity)
+        && (data.get('category', null) == null || (data.category is string && data.category.size() <= 100))
+        && (data.get('estimatedPrice', null) == null || isNumeric(data.get('estimatedPrice', null)))
+        && data.checked is bool
+        && (data.get('checkedBy', null) == null || (data.checkedBy is string && data.checkedBy.size() <= 128))
+        && data.addedBy is string && data.addedBy.size() <= 128;
+    }
+
+    // Expense validation helper
+    function isValidExpense(data) {
+      return data.expenseId is string && data.expenseId.size() <= 128
+        && data.listId is string && data.listId.size() <= 128
+        && data.familyId is string && data.familyId.size() <= 128
+        && data.shopperId is string && data.shopperId.size() <= 128
+        && data.shopperName is string && data.shopperName.size() <= 200
+        && isNumeric(data.totalSpent)
+        && data.itemsCount is int;
+    }
+
+    function isValidActivityLog(data) {
+      return data.activityId is string && data.activityId.size() <= 128
+        && data.familyId is string && data.familyId.size() <= 128
+        && data.userId is string && data.userId.size() <= 128
+        && data.userName is string && data.userName.size() <= 200
+        && data.userPhoto is string && data.userPhoto.size() <= 1000
+        && data.message is string && data.message.size() <= 1000;
+    }
+
+    // --- Collection Matching and Rules ---
+
+    // 1. Users Profiles
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || (resource != null && resource.data.get('familyId', null) != null && userFamilyIdMatches(resource.data.get('familyId', null))));
+      allow list: if isSignedIn() && resource != null && resource.data.get('familyId', null) != null && userFamilyIdMatches(resource.data.get('familyId', null));
+      allow create: if isEmailVerified() && request.auth.uid == userId && isValidUser(request.resource.data) && request.resource.data.userId == request.auth.uid;
+      allow update: if isEmailVerified() && request.auth.uid == userId && isValidUser(request.resource.data) && request.resource.data.userId == request.auth.uid;
+    }
+
+    // 2. Families Groups (Join Token instances)
+    match /families/{familyId} {
+      allow read: if isSignedIn(); // Allow reading metadata for lookup prior to joining
+      allow create: if isEmailVerified() && isValidId(familyId) && isValidFamily(request.resource.data) && request.resource.data.familyId == familyId && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isEmailVerified() && resource != null && resource.data.createdBy == request.auth.uid && request.resource.data.createdBy == request.auth.uid && isValidFamily(request.resource.data);
+    }
+
+    // 3. Shopping Lists (Collaborative)
+    match /shopping_lists/{listId} {
+      // Must enforce family boundary checks in rule queries
+      allow read, list: if isSignedIn() && resource != null && resource.data.get('familyId', null) != null && userFamilyIdMatches(resource.data.get('familyId', null));
+      allow create: if isEmailVerified() && isValidId(listId) && isValidShoppingList(request.resource.data) && request.resource.data.listId == listId && userFamilyIdMatches(request.resource.data.get('familyId', null)) && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isEmailVerified() && resource != null && userFamilyIdMatches(resource.data.get('familyId', null)) && isValidShoppingList(request.resource.data) 
+        && request.resource.data.get('familyId', null) == resource.data.get('familyId', null) // Prevent hijacking
+        && request.resource.data.createdBy == resource.data.createdBy; // Immutable owner
+      allow delete: if isEmailVerified() && resource != null && userFamilyIdMatches(resource.data.get('familyId', null));
+
+      // Nested Items within lists
+      match /items/{itemId} {
+        allow read, list: if isSignedIn() && userFamilyIdMatches(get(/databases/$(database)/documents/shopping_lists/$(listId)).data.get('familyId', null));
+        allow create: if isEmailVerified() && isValidId(itemId) && isValidShoppingItem(request.resource.data) && request.resource.data.itemId == itemId && userFamilyIdMatches(get(/databases/$(database)/documents/shopping_lists/$(listId)).data.get('familyId', null));
+        allow update: if isEmailVerified() && isValidShoppingItem(request.resource.data) && userFamilyIdMatches(get(/databases/$(database)/documents/shopping_lists/$(listId)).data.get('familyId', null));
+        allow delete: if isEmailVerified() && userFamilyIdMatches(get(/databases/$(database)/documents/shopping_lists/$(listId)).data.get('familyId', null));
+      }
+    }
+
+    // 4. Expense History logs
+    match /expenses/{expenseId} {
+      allow read, list: if isSignedIn() && resource != null && resource.data.get('familyId', null) != null && userFamilyIdMatches(resource.data.get('familyId', null));
+      allow create: if isEmailVerified() && isValidId(expenseId) && isValidExpense(request.resource.data) && request.resource.data.expenseId == expenseId && userFamilyIdMatches(request.resource.data.get('familyId', null)) && request.resource.data.shopperId == request.auth.uid;
+      // Historic expense records are write-once read-only and immutable for reporting safety
+      allow update, delete: if false;
+    }
+
+    // 5. Shared Logs / Real-time Notification Alert trigger records
+    match /activities/{activityId} {
+      allow read, list: if isSignedIn() && resource != null && resource.data.get('familyId', null) != null && userFamilyIdMatches(resource.data.get('familyId', null));
+      allow create: if isEmailVerified() && isValidId(activityId) && isValidActivityLog(request.resource.data) && request.resource.data.activityId == activityId && userFamilyIdMatches(request.resource.data.get('familyId', null)) && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

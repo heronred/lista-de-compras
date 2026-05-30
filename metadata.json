@@ -1,0 +1,6 @@
+{
+  "name": "Lista de Compras Compartilhada",
+  "description": "Uma lista de compras de supermercado colaborativa e inteligente para planejamento familiar em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
