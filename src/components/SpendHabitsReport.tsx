@@ -274,7 +274,9 @@ export default function SpendHabitsReport({ expenses, currentListItems, familyId
             {expenses.map((expense, idx) => (
               <div key={idx} className="flex justify-between items-center py-3 first:pt-0 last:pb-0">
                 <div>
-                  <p className="text-xs font-bold text-slate-700">Compras finalizadas em mercado</p>
+                  <p className="text-xs font-bold text-slate-700">
+                    {expense.listTitle ? `Lista: ${expense.listTitle}` : "Compras finalizadas em mercado"}
+                  </p>
                   <p className="text-[10px] text-slate-400">
                     Por {expense.shopperName} • {expense.itemsCount} itens comprados
                   </p>

@@ -47,6 +47,7 @@ export interface ShoppingItem {
 export interface ExpenseRecord {
   expenseId: string;
   listId: string;
+  listTitle?: string;
   familyId: string;
   shopperId: string;
   shopperName: string;

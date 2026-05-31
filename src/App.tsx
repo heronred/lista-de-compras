@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { 
   doc, 
@@ -47,7 +47,11 @@ import {
   User,
   ExternalLink,
   ChevronRight,
-  UserPlus
+  UserPlus,
+  UploadCloud,
+  Camera,
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 
 export default function App() {
@@ -79,6 +83,10 @@ export default function App() {
 
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
   const [finalInvoiceAmount, setFinalInvoiceAmount] = useState("");
+  const [checkoutScanning, setCheckoutScanning] = useState(false);
+  const [checkoutScanError, setCheckoutScanError] = useState<string | null>(null);
+  const [showCheckoutScanner, setShowCheckoutScanner] = useState(false);
+  const checkoutFileInputRef = useRef<HTMLInputElement>(null);
 
   // Category list defaults
   const categories = ["Mercearia", "Laticínios", "Frutas e Verduras", "Carnes", "Bebidas", "Padaria", "Limpeza", "Higiene", "Sobremesas", "Pet Shop", "Outros"];
@@ -144,9 +152,13 @@ export default function App() {
         result.push({ listId: d.id, ...d.data() } as ShoppingList);
       });
       setLists(result);
-      if (result.length > 0 && !activeListId) {
-        // Auto select first list
-        setActiveListId(result[0].listId);
+      if (result.length > 0) {
+        setActiveListId((current) => {
+          if (current && result.some((l) => l.listId === current)) {
+            return current;
+          }
+          return result[0].listId;
+        });
       }
     }, (err) => {
       handleFirestoreError(err, OperationType.GET, queryPath);
@@ -159,13 +171,7 @@ export default function App() {
   useEffect(() => {
     if (!activeListId) {
       setItems([]);
-      setActiveList(null);
       return;
-    }
-
-    const currentActive = lists.find(l => l.listId === activeListId);
-    if (currentActive) {
-      setActiveList(currentActive);
     }
 
     const queryPath = `shopping_lists/${activeListId}/items`;
@@ -185,6 +191,18 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, [activeListId]);
+
+  // Sync active list details
+  useEffect(() => {
+    if (!activeListId) {
+      setActiveList(null);
+      return;
+    }
+    const currentActive = lists.find(l => l.listId === activeListId);
+    if (currentActive) {
+      setActiveList(currentActive);
+    }
   }, [activeListId, lists]);
 
   // Sync historical expense receipts of family
@@ -556,6 +574,7 @@ export default function App() {
       const newExpense: ExpenseRecord = {
         expenseId,
         listId: activeListId,
+        listTitle: activeList.title,
         familyId: profile.familyId,
         shopperId: profile.userId,
         shopperName: profile.displayName,
@@ -589,10 +608,64 @@ export default function App() {
 
       setCheckoutModalOpen(false);
       setFinalInvoiceAmount("");
+      setShowCheckoutScanner(false);
+      setCheckoutScanError(null);
       // Take user to Spend Reports to immediately see the awesome charts update!
       setActiveTab("report");
     } catch (error) {
       console.error("Checkout failed:", error);
+    }
+  };
+
+  // Scan checkout invoice receipt (Nota Fiscal) total via Gemini
+  const handleCheckoutScan = async (file: File) => {
+    setCheckoutScanning(true);
+    setCheckoutScanError(null);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const resultString = reader.result as string;
+          const split = resultString.split(",");
+          const base64Data = split.length > 1 ? split[1] : null;
+          if (!base64Data) {
+            throw new Error("Erro ao ler o arquivo de cupom fiscal.");
+          }
+
+          const response = await fetch("/api/gemini/scan-nf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              rawText: null,
+              base64Image: base64Data,
+              mimeType: file.type,
+            }),
+          });
+
+          if (!response.ok) {
+            const errPayload = await response.json();
+            throw new Error(errPayload.error || "Erro ao escanear nota fiscal");
+          }
+
+          const data = await response.json();
+          if (data.totalAmount) {
+            setFinalInvoiceAmount(data.totalAmount.toString());
+            setShowCheckoutScanner(false);
+          } else {
+            throw new Error("Não foi possível encontrar o valor total na Nota Fiscal.");
+          }
+        } catch (innerErr: any) {
+          console.error(innerErr);
+          setCheckoutScanError(innerErr.message || "Erro ao processar pela IA.");
+        } finally {
+          setCheckoutScanning(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error: any) {
+      console.error(error);
+      setCheckoutScanError(error.message || "Erro na leitura do arquivo.");
+      setCheckoutScanning(false);
     }
   };
 
@@ -803,9 +876,9 @@ export default function App() {
 
   // MAIN COLLABORATIVE WORKSPACE
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col overflow-x-hidden w-full bg-slate-50/40">
       {/* Dynamic Header */}
-      <header className="bg-white border-b border-slate-100 sticky top-0 z-40">
+      <header className="bg-white border-b border-slate-100 sm:sticky sm:top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -873,39 +946,39 @@ export default function App() {
         </div>
 
         {/* Workspace views Tab Selector Bar */}
-        <div className="max-w-7xl mx-auto px-4 flex gap-6 text-sm border-t border-slate-50">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 flex justify-between sm:justify-start gap-1 sm:gap-6 text-xs sm:text-sm border-t border-slate-100 w-full overflow-hidden">
           <button
             onClick={() => setActiveTab("lists")}
-            className={`py-3 font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+            className={`py-3 font-bold flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 transition-colors cursor-pointer flex-1 sm:flex-initial ${
               activeTab === "lists" 
                 ? "border-indigo-600 text-indigo-700" 
                 : "border-transparent text-slate-400 hover:text-slate-600"
             }`}
           >
-            <ListTodo className="w-4 h-4" />
-            <span>Listas Compartilhadas</span>
+            <ListTodo className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+            <span>Listas<span className="hidden sm:inline"> Compartilhadas</span></span>
           </button>
           <button
             onClick={() => setActiveTab("supermarket")}
-            className={`py-3 font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+            className={`py-3 font-bold flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 transition-colors cursor-pointer flex-1 sm:flex-initial ${
               activeTab === "supermarket" 
                 ? "border-indigo-600 text-indigo-700" 
                 : "border-transparent text-slate-400 hover:text-slate-600"
             }`}
           >
-            <ShoppingCart className="w-4 h-4" />
-            <span>Modo Supermercado 📱</span>
+            <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+            <span>Supermercado<span className="hidden sm:inline"> Ágil</span><span className="sm:hidden"> 📱</span></span>
           </button>
           <button
             onClick={() => setActiveTab("report")}
-            className={`py-3 font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+            className={`py-3 font-bold flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 transition-colors cursor-pointer flex-1 sm:flex-initial ${
               activeTab === "report" 
                 ? "border-indigo-600 text-indigo-700" 
                 : "border-transparent text-slate-400 hover:text-slate-600"
             }`}
           >
-            <TrendingUp className="w-4 h-4" />
-            <span>Relatórios & Hábitos por IA</span>
+            <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+            <span>Relatórios<span className="hidden sm:inline"> &amp; Insights</span></span>
           </button>
         </div>
       </header>
@@ -1285,6 +1358,68 @@ export default function App() {
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-xs font-mono font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none focus:bg-white"
                 />
               </div>
+            </div>
+
+            {/* Quick checkout NF scan */}
+            <div className="border border-indigo-50 rounded-xl p-3 bg-indigo-50/20 space-y-2 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                  Escanear Cupom de Caixa (IA)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowCheckoutScanner(!showCheckoutScanner)}
+                  className="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer"
+                >
+                  {showCheckoutScanner ? "Fechar Leitor" : "Carregar Foto"}
+                </button>
+              </div>
+
+              {showCheckoutScanner ? (
+                <div className="space-y-2">
+                  <div 
+                    onClick={() => {
+                      if (!checkoutScanning) checkoutFileInputRef.current?.click();
+                    }}
+                    className="flex flex-col items-center justify-center border-2 border-dashed border-indigo-200/60 rounded-xl p-3 bg-white hover:bg-slate-50 cursor-pointer transition-colors h-24"
+                  >
+                    {checkoutScanning ? (
+                      <div className="flex flex-col items-center gap-1 text-[11px] text-slate-500">
+                        <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                        <span>Fazendo OCR por IA...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-5 h-5 text-indigo-500 mb-1" />
+                        <span className="text-[10px] font-semibold text-slate-600 text-center">Tire foto ou Envie Cupom</span>
+                        <span className="text-[8px] text-slate-400 mt-0.5 text-center leading-none">O valor final será preenchido automaticamente</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      ref={checkoutFileInputRef}
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleCheckoutScan(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </div>
+                  {checkoutScanError && (
+                    <div className="text-[10px] text-red-500 bg-red-50 p-1.5 rounded font-medium border border-red-100 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                      <span>{checkoutScanError}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[9px] text-slate-400 font-medium leading-normal">
+                  Economize tempo fotografando sua nota fiscal ou cupom para capturar o valor de forma inteligente.
+                </p>
+              )}
             </div>
 
             <div className="flex gap-2">
